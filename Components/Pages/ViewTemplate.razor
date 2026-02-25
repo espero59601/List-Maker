@@ -1,0 +1,245 @@
+@page "/view/{TemplateId}"
+@inject ListTemplateService TemplateService
+@inject ImageService ImageService
+@inject NavigationManager Navigation
+
+<div class="page-content">
+    <div class="page-header">
+        <button class="btn btn-back" @onclick="GoBack">← Back</button>
+        <h1>@_template.Name</h1>
+    </div>
+
+    @if (_template.HasCoverImage)
+    {
+        <div class="view-cover">
+            <img src="@_template.CoverImageSource" alt="@_template.Name" />
+        </div>
+    }
+
+    @if (!string.IsNullOrEmpty(_template.Description))
+    {
+        <p class="view-description">@_template.Description</p>
+    }
+
+    <!-- Summary Bar -->
+    <div class="summary-bar">
+        <div class="summary-stat">
+            <span class="summary-number">@_template.Items.Count</span>
+            <span class="summary-label">Items</span>
+        </div>
+        <div class="summary-stat">
+            <span class="summary-number">@_template.Items.Sum(i => i.Quantity)</span>
+            <span class="summary-label">Total Qty</span>
+        </div>
+        <div class="summary-stat">
+            <span class="summary-number">@_template.Items.Count(i => i.Quantity > 0)</span>
+            <span class="summary-label">Have</span>
+        </div>
+        <div class="summary-stat">
+            <span class="summary-number">@_template.Items.Count(i => i.Quantity == 0)</span>
+            <span class="summary-label">Need</span>
+        </div>
+    </div>
+
+    <!-- Item List -->
+    <div class="view-items">
+        @foreach (var item in _template.Items.OrderBy(i => i.SortOrder))
+        {
+            <div class="view-item @(item.Quantity > 0 ? "has-items" : "needs-items")">
+                <div class="view-item-main">
+                    <!-- Item Image (thumbnail) -->
+                    <div class="item-thumbnail" @onclick="() => ShowImageOptions(item)">
+                        @if (item.HasImage)
+                        {
+                            <img src="@item.ImageSource" alt="@item.Name" />
+                        }
+                        else
+                        {
+                            <span class="thumbnail-placeholder">📷</span>
+                        }
+                    </div>
+
+                    <!-- Item Name -->
+                    <div class="item-info">
+                        <span class="view-item-name">@item.Name</span>
+                        @if (!string.IsNullOrEmpty(item.Description))
+                        {
+                            <span class="view-item-desc">@item.Description</span>
+                        }
+                    </div>
+
+                    <!-- Quantity Controls -->
+                    <div class="quantity-controls">
+                        <button class="qty-btn qty-minus" 
+                                @onclick="() => ChangeQuantity(item, -1)"
+                                disabled="@(item.Quantity <= 0)">−</button>
+                        <input type="number" 
+                               class="qty-input" 
+                               value="@item.Quantity"
+                               min="0"
+                               @onchange="(e) => SetQuantity(item, e)" />
+                        <button class="qty-btn qty-plus" 
+                                @onclick="() => ChangeQuantity(item, 1)">+</button>
+                    </div>
+                </div>
+
+                <!-- Image Options (expandable) -->
+                @if (_imageOptionsItemId == item.Id)
+                {
+                    <div class="image-options">
+                        <button class="btn btn-small btn-secondary" @onclick="() => PickImageForItem(item)">
+                            🖼 Gallery
+                        </button>
+                        <button class="btn btn-small btn-secondary" @onclick="() => TakePhotoForItem(item)">
+                            📸 Camera
+                        </button>
+                        <div class="url-input-row">
+                            <input type="text" 
+                                   class="form-input form-input-small" 
+                                   placeholder="Paste image URL..."
+                                   @bind="_imageUrlInput" 
+                                   @bind:event="oninput" />
+                            <button class="btn btn-small btn-primary" 
+                                    @onclick="() => SetImageUrl(item)"
+                                    disabled="@string.IsNullOrWhiteSpace(_imageUrlInput)">
+                                Set
+                            </button>
+                        </div>
+                        @if (item.HasImage)
+                        {
+                            <button class="btn btn-small btn-danger" @onclick="() => RemoveImage(item)">
+                                Remove Image
+                            </button>
+                        }
+                        <button class="btn btn-small" @onclick="CloseImageOptions">Cancel</button>
+                    </div>
+                }
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter]
+    public string TemplateId { get; set; } = string.Empty;
+
+    private ListTemplate _template = new();
+    private string? _imageOptionsItemId;
+    private string _imageUrlInput = string.Empty;
+    private bool _isDirty = false;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!string.IsNullOrEmpty(TemplateId))
+        {
+            var loaded = await TemplateService.GetTemplateAsync(TemplateId);
+            if (loaded != null)
+                _template = loaded;
+            else
+                Navigation.NavigateTo("/");
+        }
+    }
+
+    private void ChangeQuantity(ListItem item, int delta)
+    {
+        item.Quantity = Math.Max(0, item.Quantity + delta);
+        _isDirty = true;
+        _ = AutoSave();
+    }
+
+    private void SetQuantity(ListItem item, ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out var val))
+        {
+            item.Quantity = Math.Max(0, val);
+            _isDirty = true;
+            _ = AutoSave();
+        }
+    }
+
+    private async Task AutoSave()
+    {
+        if (_isDirty)
+        {
+            await TemplateService.SaveTemplateAsync(_template);
+            _isDirty = false;
+        }
+    }
+
+    // --- Image handling ---
+
+    private void ShowImageOptions(ListItem item)
+    {
+        if (_imageOptionsItemId == item.Id)
+        {
+            _imageOptionsItemId = null;
+        }
+        else
+        {
+            _imageOptionsItemId = item.Id;
+            _imageUrlInput = item.ImageUrl;
+        }
+    }
+
+    private void CloseImageOptions()
+    {
+        _imageOptionsItemId = null;
+        _imageUrlInput = string.Empty;
+    }
+
+    private async Task PickImageForItem(ListItem item)
+    {
+        var path = await ImageService.PickFromGalleryAsync();
+        if (!string.IsNullOrEmpty(path))
+        {
+            // Remove old local image if exists
+            ImageService.DeleteImage(item.ImagePath);
+            item.ImagePath = path;
+            item.ImageUrl = string.Empty;
+            _imageOptionsItemId = null;
+            await TemplateService.SaveTemplateAsync(_template);
+        }
+    }
+
+    private async Task TakePhotoForItem(ListItem item)
+    {
+        var path = await ImageService.TakePhotoAsync();
+        if (!string.IsNullOrEmpty(path))
+        {
+            ImageService.DeleteImage(item.ImagePath);
+            item.ImagePath = path;
+            item.ImageUrl = string.Empty;
+            _imageOptionsItemId = null;
+            await TemplateService.SaveTemplateAsync(_template);
+        }
+    }
+
+    private async Task SetImageUrl(ListItem item)
+    {
+        if (!string.IsNullOrWhiteSpace(_imageUrlInput))
+        {
+            // Remove old local image if exists
+            ImageService.DeleteImage(item.ImagePath);
+            item.ImagePath = string.Empty;
+            item.ImageUrl = _imageUrlInput.Trim();
+            _imageOptionsItemId = null;
+            _imageUrlInput = string.Empty;
+            await TemplateService.SaveTemplateAsync(_template);
+        }
+    }
+
+    private async Task RemoveImage(ListItem item)
+    {
+        ImageService.DeleteImage(item.ImagePath);
+        item.ImagePath = string.Empty;
+        item.ImageUrl = string.Empty;
+        _imageOptionsItemId = null;
+        await TemplateService.SaveTemplateAsync(_template);
+    }
+
+    private void GoBack()
+    {
+        _ = AutoSave();
+        Navigation.NavigateTo("/");
+    }
+}

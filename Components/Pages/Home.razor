@@ -1,0 +1,261 @@
+@page "/"
+@inject ListTemplateService TemplateService
+@inject FileImportService ImportService
+@inject NavigationManager Navigation
+
+<div class="page-content">
+    <div class="page-header">
+        <h1>My Lists</h1>
+        <div class="header-actions">
+            <button class="btn btn-secondary" @onclick="ImportFile">
+                📥 Import
+            </button>
+            <button class="btn btn-primary" @onclick="CreateNewList">
+                + New List
+            </button>
+        </div>
+    </div>
+
+    <!-- Import Status/Preview -->
+    @if (_showImportPreview && _importResult != null)
+    {
+        <div class="import-preview">
+            @if (_importResult.Success)
+            {
+                <div class="import-success">
+                    <h3>✅ @_importResult.Message</h3>
+                    <div class="import-details">
+                        <label class="form-label">List Name</label>
+                        <input type="text" class="form-input"
+                               @bind="_importResult.Template!.Name"
+                               @bind:event="oninput" />
+
+                        <label class="form-label">Category</label>
+                        <input type="text" class="form-input"
+                               placeholder="e.g., Coins, Paints, Books..."
+                               @bind="_importResult.Template!.Category"
+                               @bind:event="oninput" />
+
+                        <label class="form-label">Preview (@_importResult.ItemCount items)</label>
+                        <div class="import-item-preview">
+                            @foreach (var item in _importResult.Template!.Items.Take(10))
+                            {
+                                <div class="preview-item">
+                                    <span class="preview-name">@item.Name</span>
+                                    @if (!string.IsNullOrEmpty(item.Description))
+                                    {
+                                        <span class="preview-desc">@item.Description</span>
+                                    }
+                                    @if (item.Quantity > 0)
+                                    {
+                                        <span class="preview-qty">qty: @item.Quantity</span>
+                                    }
+                                </div>
+                            }
+                            @if (_importResult.ItemCount > 10)
+                            {
+                                <div class="preview-more">
+                                    ...and @(_importResult.ItemCount - 10) more items
+                                </div>
+                            }
+                        </div>
+                    </div>
+                    <div class="import-actions">
+                        <button class="btn btn-primary" @onclick="SaveImportedList">
+                            Save List
+                        </button>
+                        <button class="btn btn-secondary" @onclick="CancelImport">
+                            Cancel
+                        </button>
+                    </div>
+                </div>
+            }
+            else
+            {
+                <div class="import-error">
+                    <h3>❌ Import Failed</h3>
+                    <p>@_importResult.ErrorMessage</p>
+                    <button class="btn btn-secondary btn-small" @onclick="CancelImport">
+                        Dismiss
+                    </button>
+                </div>
+            }
+        </div>
+    }
+
+    @if (_importing)
+    {
+        <div class="loading-message">Reading file...</div>
+    }
+
+    @if (_loading)
+    {
+        <div class="loading-message">Loading your lists...</div>
+    }
+    else if (_templates.Count == 0 && !_showImportPreview)
+    {
+        <div class="empty-state">
+            <div class="empty-icon">📋</div>
+            <h2>No lists yet</h2>
+            <p>Create your first list or import one from a file!</p>
+            <p class="empty-examples">
+                Ideas: coin collections, paint colors, bird watching, 
+                recipe ingredients, travel packing, book reading lists...
+            </p>
+            <div class="empty-actions">
+                <button class="btn btn-secondary" @onclick="ImportFile">
+                    📥 Import a File
+                </button>
+                <button class="btn btn-primary" @onclick="CreateNewList">
+                    Create From Scratch
+                </button>
+            </div>
+        </div>
+    }
+    else
+    {
+        <div class="template-grid">
+            @foreach (var template in _templates)
+            {
+                <div class="template-card" @onclick="() => ViewTemplate(template.Id)">
+                    @if (template.HasCoverImage)
+                    {
+                        <div class="card-cover">
+                            <img src="@template.CoverImageSource" alt="@template.Name" />
+                        </div>
+                    }
+                    <div class="card-body">
+                        <div class="card-header">
+                            <h3 class="card-title">@template.Name</h3>
+                            @if (!string.IsNullOrEmpty(template.Category))
+                            {
+                                <span class="card-category">@template.Category</span>
+                            }
+                        </div>
+                        @if (!string.IsNullOrEmpty(template.Description))
+                        {
+                            <p class="card-description">@template.Description</p>
+                        }
+                        <div class="card-footer">
+                            <span class="item-count">
+                                @template.Items.Count item@(template.Items.Count != 1 ? "s" : "")
+                                @{
+                                    var totalQty = template.Items.Sum(i => i.Quantity);
+                                    if (totalQty > 0)
+                                    {
+                                        <text> · @totalQty total</text>
+                                    }
+                                }
+                            </span>
+                            <span class="modified-date">@template.ModifiedDate.ToString("MMM d, yyyy")</span>
+                        </div>
+                        <div class="card-actions">
+                            <button class="btn btn-small btn-secondary"
+                                    @onclick="() => EditTemplate(template.Id)"
+                                    @onclick:stopPropagation="true">
+                                Edit
+                            </button>
+                            <button class="btn btn-small btn-danger" 
+                                    @onclick="() => DeleteTemplate(template.Id)" 
+                                    @onclick:stopPropagation="true">
+                                Delete
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    private List<ListTemplate> _templates = new();
+    private bool _loading = true;
+    private bool _importing = false;
+    private bool _showImportPreview = false;
+    private ImportResult? _importResult;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadTemplates();
+    }
+
+    private async Task LoadTemplates()
+    {
+        _loading = true;
+        _templates = await TemplateService.GetAllTemplatesAsync();
+        _loading = false;
+    }
+
+    private void CreateNewList()
+    {
+        Navigation.NavigateTo("/edit");
+    }
+
+    private void ViewTemplate(string id)
+    {
+        Navigation.NavigateTo($"/view/{id}");
+    }
+
+    private void EditTemplate(string id)
+    {
+        Navigation.NavigateTo($"/edit/{id}");
+    }
+
+    private async Task DeleteTemplate(string id)
+    {
+        await TemplateService.DeleteTemplateAsync(id);
+        await LoadTemplates();
+    }
+
+    // --- Import ---
+
+    private async Task ImportFile()
+    {
+        _importing = true;
+        _showImportPreview = false;
+        _importResult = null;
+        StateHasChanged();
+
+        try
+        {
+            _importResult = await ImportService.ImportFromFileAsync();
+
+            if (_importResult != null)
+            {
+                _showImportPreview = true;
+            }
+        }
+        catch (Exception ex)
+        {
+            _importResult = new ImportResult
+            {
+                Success = false,
+                ErrorMessage = $"Unexpected error: {ex.Message}"
+            };
+            _showImportPreview = true;
+        }
+        finally
+        {
+            _importing = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task SaveImportedList()
+    {
+        if (_importResult?.Template != null)
+        {
+            await TemplateService.SaveTemplateAsync(_importResult.Template);
+            _showImportPreview = false;
+            _importResult = null;
+            await LoadTemplates();
+        }
+    }
+
+    private void CancelImport()
+    {
+        _showImportPreview = false;
+        _importResult = null;
+    }
+}

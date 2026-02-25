@@ -1,0 +1,401 @@
+@page "/edit"
+@page "/edit/{TemplateId}"
+@inject ListTemplateService TemplateService
+@inject ImageService ImageService
+@inject NavigationManager Navigation
+
+<div class="page-content">
+    <div class="page-header">
+        <button class="btn btn-back" @onclick="GoBack">← Back</button>
+        <h1>@(_isNew ? "Create New List" : "Edit List")</h1>
+    </div>
+
+    <div class="edit-form">
+        <!-- Cover Image Section -->
+        <div class="form-section">
+            <label class="form-label">Cover Image</label>
+            <div class="cover-image-editor">
+                @if (_template.HasCoverImage)
+                {
+                    <div class="cover-preview">
+                        <img src="@_template.CoverImageSource" alt="Cover" />
+                        <button class="btn btn-small btn-danger cover-remove-btn" @onclick="RemoveCoverImage">
+                            ✕ Remove
+                        </button>
+                    </div>
+                }
+                else
+                {
+                    <div class="cover-placeholder" @onclick="() => _showCoverOptions = !_showCoverOptions">
+                        <span>📷 Add cover image</span>
+                    </div>
+                }
+
+                @if (_showCoverOptions || _template.HasCoverImage)
+                {
+                    <div class="image-options">
+                        <button class="btn btn-small btn-secondary" @onclick="PickCoverFromGallery">
+                            🖼 Gallery
+                        </button>
+                        <button class="btn btn-small btn-secondary" @onclick="TakeCoverPhoto">
+                            📸 Camera
+                        </button>
+                        <div class="url-input-row">
+                            <input type="text"
+                                   class="form-input form-input-small"
+                                   placeholder="Paste image URL..."
+                                   @bind="_coverUrlInput"
+                                   @bind:event="oninput" />
+                            <button class="btn btn-small btn-primary"
+                                    @onclick="SetCoverUrl"
+                                    disabled="@string.IsNullOrWhiteSpace(_coverUrlInput)">
+                                Set
+                            </button>
+                        </div>
+                    </div>
+                }
+            </div>
+        </div>
+
+        <!-- List Details Section -->
+        <div class="form-section">
+            <label class="form-label">List Name *</label>
+            <input type="text" 
+                   class="form-input" 
+                   placeholder="e.g., Lincoln Head Pennies, Army Painter Colors"
+                   @bind="_template.Name" 
+                   @bind:event="oninput" />
+
+            <label class="form-label">Category</label>
+            <input type="text" 
+                   class="form-input" 
+                   placeholder="e.g., Coins, Paints, Books, Travel"
+                   @bind="_template.Category" 
+                   @bind:event="oninput" />
+
+            <label class="form-label">Description</label>
+            <textarea class="form-textarea" 
+                      placeholder="Describe what this list is for..."
+                      @bind="_template.Description" 
+                      @bind:event="oninput"></textarea>
+        </div>
+
+        <!-- Items Section -->
+        <div class="form-section">
+            <div class="section-header">
+                <h2>List Items (@_template.Items.Count)</h2>
+            </div>
+
+            <!-- Add New Item -->
+            <div class="add-item-row">
+                <input type="text" 
+                       class="form-input" 
+                       placeholder="Type an item name and press Add..."
+                       @bind="_newItemName" 
+                       @bind:event="oninput"
+                       @onkeydown="HandleKeyDown" />
+                <button class="btn btn-primary" 
+                        @onclick="AddItem" 
+                        disabled="@string.IsNullOrWhiteSpace(_newItemName)">
+                    Add
+                </button>
+            </div>
+
+            <!-- Bulk Add -->
+            <div class="bulk-add-section">
+                <button class="btn btn-secondary btn-small" @onclick="ToggleBulkAdd">
+                    @(_showBulkAdd ? "Hide Bulk Add" : "Bulk Add (one per line)")
+                </button>
+                @if (_showBulkAdd)
+                {
+                    <textarea class="form-textarea bulk-textarea" 
+                              placeholder="Paste or type multiple items, one per line..."
+                              @bind="_bulkItemText" 
+                              @bind:event="oninput"></textarea>
+                    <button class="btn btn-primary btn-small" 
+                            @onclick="AddBulkItems"
+                            disabled="@string.IsNullOrWhiteSpace(_bulkItemText)">
+                        Add All
+                    </button>
+                }
+            </div>
+
+            <!-- Item List -->
+            @if (_template.Items.Count > 0)
+            {
+                <div class="items-list">
+                    @foreach (var item in _template.Items.OrderBy(i => i.SortOrder))
+                    {
+                        <div class="item-row">
+                            <span class="item-number">@(item.SortOrder + 1).</span>
+                            
+                            @if (_editingItemId == item.Id)
+                            {
+                                <input type="text" 
+                                       class="form-input item-edit-input" 
+                                       @bind="_editingItemName" 
+                                       @bind:event="oninput"
+                                       @onkeydown="HandleEditKeyDown" />
+                                <button class="btn btn-small btn-primary" @onclick="SaveItemEdit">Save</button>
+                                <button class="btn btn-small" @onclick="CancelItemEdit">Cancel</button>
+                            }
+                            else
+                            {
+                                <span class="item-name" @onclick="() => StartEditItem(item)">
+                                    @item.Name
+                                </span>
+                                <div class="item-actions">
+                                    <button class="btn btn-icon" 
+                                            @onclick="() => MoveItemUp(item)" 
+                                            disabled="@(item.SortOrder == 0)"
+                                            title="Move up">▲</button>
+                                    <button class="btn btn-icon" 
+                                            @onclick="() => MoveItemDown(item)" 
+                                            disabled="@(item.SortOrder == _template.Items.Count - 1)"
+                                            title="Move down">▼</button>
+                                    <button class="btn btn-icon btn-danger-icon" 
+                                            @onclick="() => RemoveItem(item)"
+                                            title="Remove">✕</button>
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+
+        <!-- Save Button -->
+        <div class="form-actions">
+            <button class="btn btn-primary btn-large" 
+                    @onclick="SaveTemplate"
+                    disabled="@string.IsNullOrWhiteSpace(_template.Name)">
+                @(_isNew ? "Create List" : "Save Changes")
+            </button>
+            @if (!string.IsNullOrEmpty(_statusMessage))
+            {
+                <span class="status-message @(_isError ? "error" : "success")">
+                    @_statusMessage
+                </span>
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter]
+    public string? TemplateId { get; set; }
+
+    private ListTemplate _template = new();
+    private bool _isNew = true;
+    private string _newItemName = string.Empty;
+    private string _bulkItemText = string.Empty;
+    private bool _showBulkAdd = false;
+    private string? _editingItemId;
+    private string _editingItemName = string.Empty;
+    private string _statusMessage = string.Empty;
+    private bool _isError = false;
+
+    // Cover image
+    private bool _showCoverOptions = false;
+    private string _coverUrlInput = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!string.IsNullOrEmpty(TemplateId))
+        {
+            var existing = await TemplateService.GetTemplateAsync(TemplateId);
+            if (existing != null)
+            {
+                _template = existing;
+                _isNew = false;
+                _coverUrlInput = existing.CoverImageUrl;
+            }
+        }
+    }
+
+    // --- Cover Image ---
+
+    private async Task PickCoverFromGallery()
+    {
+        var path = await ImageService.PickFromGalleryAsync();
+        if (!string.IsNullOrEmpty(path))
+        {
+            ImageService.DeleteImage(_template.CoverImagePath);
+            _template.CoverImagePath = path;
+            _template.CoverImageUrl = string.Empty;
+            _showCoverOptions = false;
+        }
+    }
+
+    private async Task TakeCoverPhoto()
+    {
+        var path = await ImageService.TakePhotoAsync();
+        if (!string.IsNullOrEmpty(path))
+        {
+            ImageService.DeleteImage(_template.CoverImagePath);
+            _template.CoverImagePath = path;
+            _template.CoverImageUrl = string.Empty;
+            _showCoverOptions = false;
+        }
+    }
+
+    private void SetCoverUrl()
+    {
+        if (!string.IsNullOrWhiteSpace(_coverUrlInput))
+        {
+            ImageService.DeleteImage(_template.CoverImagePath);
+            _template.CoverImagePath = string.Empty;
+            _template.CoverImageUrl = _coverUrlInput.Trim();
+            _showCoverOptions = false;
+        }
+    }
+
+    private void RemoveCoverImage()
+    {
+        ImageService.DeleteImage(_template.CoverImagePath);
+        _template.CoverImagePath = string.Empty;
+        _template.CoverImageUrl = string.Empty;
+        _showCoverOptions = false;
+    }
+
+    // --- Item Management ---
+
+    private void AddItem()
+    {
+        if (string.IsNullOrWhiteSpace(_newItemName))
+            return;
+
+        _template.Items.Add(new ListItem
+        {
+            Name = _newItemName.Trim(),
+            SortOrder = _template.Items.Count
+        });
+
+        _newItemName = string.Empty;
+    }
+
+    private void AddBulkItems()
+    {
+        if (string.IsNullOrWhiteSpace(_bulkItemText))
+            return;
+
+        var lines = _bulkItemText.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        var startOrder = _template.Items.Count;
+
+        foreach (var line in lines)
+        {
+            var trimmed = line.Trim();
+            if (!string.IsNullOrEmpty(trimmed))
+            {
+                _template.Items.Add(new ListItem
+                {
+                    Name = trimmed,
+                    SortOrder = startOrder++
+                });
+            }
+        }
+
+        _bulkItemText = string.Empty;
+        _showBulkAdd = false;
+    }
+
+    private void RemoveItem(ListItem item)
+    {
+        ImageService.DeleteImage(item.ImagePath);
+        _template.Items.Remove(item);
+        var sorted = _template.Items.OrderBy(i => i.SortOrder).ToList();
+        for (int i = 0; i < sorted.Count; i++)
+            sorted[i].SortOrder = i;
+    }
+
+    private void MoveItemUp(ListItem item)
+    {
+        if (item.SortOrder <= 0) return;
+        var swapWith = _template.Items.FirstOrDefault(i => i.SortOrder == item.SortOrder - 1);
+        if (swapWith != null)
+        {
+            swapWith.SortOrder++;
+            item.SortOrder--;
+        }
+    }
+
+    private void MoveItemDown(ListItem item)
+    {
+        if (item.SortOrder >= _template.Items.Count - 1) return;
+        var swapWith = _template.Items.FirstOrDefault(i => i.SortOrder == item.SortOrder + 1);
+        if (swapWith != null)
+        {
+            swapWith.SortOrder--;
+            item.SortOrder++;
+        }
+    }
+
+    private void StartEditItem(ListItem item)
+    {
+        _editingItemId = item.Id;
+        _editingItemName = item.Name;
+    }
+
+    private void SaveItemEdit()
+    {
+        if (_editingItemId != null && !string.IsNullOrWhiteSpace(_editingItemName))
+        {
+            var item = _template.Items.FirstOrDefault(i => i.Id == _editingItemId);
+            if (item != null)
+                item.Name = _editingItemName.Trim();
+        }
+        CancelItemEdit();
+    }
+
+    private void CancelItemEdit()
+    {
+        _editingItemId = null;
+        _editingItemName = string.Empty;
+    }
+
+    private async Task SaveTemplate()
+    {
+        if (string.IsNullOrWhiteSpace(_template.Name))
+        {
+            _statusMessage = "Please enter a list name.";
+            _isError = true;
+            return;
+        }
+
+        try
+        {
+            await TemplateService.SaveTemplateAsync(_template);
+            _statusMessage = "Saved successfully!";
+            _isError = false;
+            _isNew = false;
+            await Task.Delay(800);
+            Navigation.NavigateTo("/");
+        }
+        catch (Exception ex)
+        {
+            _statusMessage = $"Error saving: {ex.Message}";
+            _isError = true;
+        }
+    }
+
+    private void HandleKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") AddItem();
+    }
+
+    private void HandleEditKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") SaveItemEdit();
+        else if (e.Key == "Escape") CancelItemEdit();
+    }
+
+    private void ToggleBulkAdd()
+    {
+        _showBulkAdd = !_showBulkAdd;
+    }
+
+    private void GoBack()
+    {
+        Navigation.NavigateTo("/");
+    }
+}
